@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ujian Online - Anti Curang</title>
+    <style>
+        :root {
+            --bahaya: #e53935;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: #333;
+            font-family: sans-serif;
+        }
+        #warning-screen {
+            display: flex;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 9999;
+            text-align: center;
+        }
+        #warning-screen h2 {
+            color: var(--bahaya);
+            margin-bottom: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        /* Timer */
+        #timer-bar {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%;
+            padding: 10px 16px;
+            background: rgba(0,0,0,0.75);
+            color: #fff;
+            font-size: 20px;
+            font-weight: bold;
+            text-align: center;
+            z-index: 9998;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+        #timer-bar.aman { background: rgba(0,0,0,0.75); color: #fff; }
+        #timer-bar.menipis { background: #b71c1c; color: #fff; }
+        #timer-bar.penalty {
+            background: var(--bahaya);
+            color: #fff;
+            animation: getar 0.5s ease-in-out;
+        }
+        @keyframes getar {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-6px); }
+            75% { transform: translateX(6px); }
+        }
+        #timer-text { font-variant-numeric: tabular-nums; letter-spacing: 1px; }
+        #timer-total { font-size: 13px; font-weight: normal; opacity: 0.75; }
+        #penalti-total { font-size: 13px; font-weight: normal; color: #ffcdd2; }
+
+        /* Toast penalti */
+        #toast-penalty {
+            position: fixed;
+            top: 64px; left: 50%;
+            transform: translateX(-50%) scale(0.7);
+            padding: 14px 26px;
+            background: var(--bahaya);
+            color: #fff;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 8px;
+            z-index: 10000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+        }
+        #toast-penalty.tampil {
+            opacity: 1;
+            transform: translateX(-50%) scale(1);
+        }
+        #toast-penalty small {
+            display: block;
+            font-size: 13px;
+            font-weight: normal;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Layar Peringatan / Tombol Mulai -->
+    <div id="warning-screen">
+        <h2 id="judul-peringatan">Perhatian!</h2>
+        <p id="pesan-peringatan">Ujian ini mewajibkan mode layar penuh (fullscreen) dan tidak boleh berpindah tab.</p>
+        <p>Durasi ujian: <strong id="durasi-info">-</strong> &nbsp;|&nbsp; Penalti per pelanggaran: <strong id="penalti-info">-</strong></p>
+        <p id="violation-count">Pelanggaran terdeteksi: 0</p>
+        <p id="sisa-waktu-info">Sisa waktu: -</p>
+        <button id="tombol-mulai" onclick="mulaiUjian()">Mulai Ujian</button>
+    </div>
+
+    <!-- Bar Timer -->
+    <div id="timer-bar">
+        <span id="timer-text">00:00:00</span>
+        <span id="timer-total"></span>
+        <span id="penalti-total"></span>
+    </div>
+
+    <!-- Notifikasi Penalti -->
+    <div id="toast-penalty">
+        <span id="toast-penalty-teks">-30 Detik</span>
+        <small id="toast-penalty-keterangan">Waktu mundur 30 detik</small>
+    </div>
+
+    <!-- Ganti URL Google Form Anda di bawah ini -->
+    <iframe id="form-iframe" src="https://pbx.sch.id"></iframe>
+
+    <script>
+        // ============ KONFIGURASI ============
+        const DURASI_UJIAN_MENIT = 5;   // Durasi ujian dalam menit
+        const PENALTI_DETIK = 30;        // Pengurangan waktu per pelanggaran (detik)
+        const AMBANG_MENIPIS = 300;      // Tampil merah jika sisa waktu <= 5 menit
+
+        // ============ STATE ============
+        let pelanggaran = 0;
+        let totalPenalti = 0;            // Total detik yang dipotong
+        let durasiUjian = DURASI_UJIAN_MENIT * 60;
+        let sisaWaktu = durasiUjian;
+        let ujianDimulai = false;
+        let waktuHabis = false;
+        let intervalId = null;
+
+        const elWarning = document.getElementById('warning-screen');
+        const elJudgeul = document.getElementById('judul-peringatan');
+        const elPesan = document.getElementById('pesan-peringatan');
+        const elTombol = document.getElementById('tombol-mulai');
+        const elViolation = document.getElementById('violation-count');
+        const elSisaInfo = document.getElementById('sisa-waktu-info');
+        const elDurasiInfo = document.getElementById('durasi-info');
+        const elPenaltiInfo = document.getElementById('penalti-info');
+        const elTimerBar = document.getElementById('timer-bar');
+        const elTimerText = document.getElementById('timer-text');
+        const elTimerTotal = document.getElementById('timer-total');
+        const elPenaltiTotal = document.getElementById('penalti-total');
+        const elToast = document.getElementById('toast-penalty');
+        const elToastTeks = document.getElementById('toast-penalty-teks');
+        const elToastKet = document.getElementById('toast-penalty-keterangan');
+
+        function formatWaktu(detik) {
+            detik = Math.max(0, Math.floor(detik));
+            const jam = Math.floor(detik / 3600);
+            const menit = Math.floor((detik % 3600) / 60);
+            const detikSisa = detik % 60;
+            return [jam, menit, detikSisa]
+                .map(n => String(n).padStart(2, '0'))
+                .join(':');
+        }
+
+        function perbaruiTimer() {
+            elTimerText.textContent = formatWaktu(sisaWaktu);
+            elTimerTotal.textContent = 'dari ' + formatWaktu(durasiUjian);
+            elPenaltiTotal.textContent = totalPenalti > 0
+                ? 'Penalti: -' + formatWaktu(totalPenalti)
+                : '';
+            elSisaInfo.textContent = 'Sisa waktu: ' + formatWaktu(sisaWaktu);
+        }
+
+        function mulaiTimer() {
+            if (intervalId !== null) return;
+            intervalId = setInterval(() => {
+                if (!ujianDimulai || waktuHabis) return;
+                sisaWaktu--;
+                perbaruiTimer();
+                perbaruiWarnaTimer();
+                if (sisaWaktu <= 0) {
+                    sisaWaktu = 0;
+                    waktuHabis = true;
+                    berhentiTimer();
+                    perbaruiTimer();
+                    akhiriUjian('Waktu ujian telah habis.');
+                }
+            }, 1000);
+        }
+
+        function berhentiTimer() {
+            if (intervalId !== null) {
+                clearInterval(intervalId);
+                intervalId = null;
+            }
+        }
+
+        function perbaruiWarnaTimer() {
+            elTimerBar.classList.remove('aman', 'menipis');
+            if (sisaWaktu <= AMBANG_MENIPIS) {
+                elTimerBar.classList.add('menipis');
+            } else {
+                elTimerBar.classList.add('aman');
+            }
+        }
+
+        // Terapkan penalti waktu mundur
+        function terapkanPenalti(alasan) {
+            if (waktuHabis) return;
+
+            pelanggaran++;
+            totalPenalti += PENALTI_DETIK;
+            sisaWaktu = Math.max(0, sisaWaktu - PENALTI_DETIK);
+
+            // Update angka
+            document.getElementById('violation-count').innerText = "Pelanggaran terdeteksi: " + pelanggaran;
+            perbaruiTimer();
+            perbaruiWarnaTimer();
+
+            // Efek visual
+            elTimerBar.classList.remove('penalty');
+            void elTimerBar.offsetWidth;
+            elTimerBar.classList.add('penalty');
+            setTimeout(() => elTimerBar.classList.remove('penalty'), 500);
+
+            elToastTeks.textContent = '-' + PENALTI_DETIK + ' Detik';
+            elToastKet.textContent = 'Waktu mundur ' + PENALTI_DETIK + ' detik' +
+                (alasan ? ' karena ' + alasan : '') +
+                ' | Sisa waktu: ' + formatWaktu(sisaWaktu);
+            elToast.classList.add('tampil');
+            clearTimeout(elToast._timer);
+            elToast._timer = setTimeout(() => elToast.classList.remove('tampil'), 3000);
+
+            if (sisaWaktu <= 0) {
+                waktuHabis = true;
+                berhentiTimer();
+                perbaruiTimer();
+                akhiriUjian('Waktu ujian habis karena penalti pelanggaran.');
+            }
+        }
+
+        function tampilkanPeringatan(judul, pesan, aksiTeks) {
+            elJudgeul.textContent = judul;
+            elPesan.textContent = pesan;
+            elTombol.textContent = aksiTeks || 'Lanjutkan Ujian';
+            elWarning.style.display = 'flex';
+        }
+
+        function akhiriUjian(pesan) {
+            tampilkanPeringatan('Ujian Selesai', pesan, 'Tutup');
+            elTombol.onclick = function () { window.close(); };
+            if (document.fullscreenElement && document.exitFullscreen) {
+                document.exitFullscreen();
+            }
+        }
+
+        function mulaiUjian() {
+            if (waktuHabis) return;
+
+            const elem = document.documentElement;
+            if (elem.requestFullscreen) {
+                elem.requestFullscreen();
+            }
+            elWarning.style.display = 'none';
+            ujianDimulai = true;
+            mulaiTimer();
+            perbaruiTimer();
+            perbaruiWarnaTimer();
+        }
+
+        // Inisialisasi
+        elDurasiInfo.textContent = DURASI_UJIAN_MENIT + ' menit';
+        elPenaltiInfo.textContent = PENALTI_DETIK + ' detik';
+        perbaruiTimer();
+        perbaruiWarnaTimer();
+
+        // Deteksi jika keluar dari Fullscreen
+        document.addEventListener("fullscreenchange", () => {
+            if (!document.fullscreenElement) {
+                if (waktuHabis) return;
+                terapkanPenalti('keluar dari layar penuh');
+                tampilkanPeringatan(
+                    'Pelanggaran Terdeteksi!',
+                    'Anda keluar dari layar penuh. Waktu mundur ' + PENALTI_DETIK + ' detik.',
+                    'Lanjutkan Ujian'
+                );
+            }
+        });
+
+        // Deteksi jika berpindah tab atau meminimalkan browser
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden) {
+                if (waktuHabis) return;
+                terapkanPenalti('meninggalkan halaman ujian');
+                tampilkanPeringatan(
+                    'Pelanggaran Terdeteksi!',
+                    'Anda terdeteksi meninggalkan halaman ujian (' + pelanggaran + '). ' +
+                    'Waktu mundur ' + PENALTI_DETIK + ' detik.',
+                    'Lanjutkan Ujian'
+                );
+            }
+        });
+
+        // Mencegah Klik Kanan
+        document.addEventListener('contextmenu', event => event.preventDefault());
+    </script>
+</body>
+</html>
