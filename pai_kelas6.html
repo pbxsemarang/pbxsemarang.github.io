@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ujian Online - Anti Curang</title>
+    <style>
+        :root {
+            --bahaya: #e53935;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: #333;
+            font-family: sans-serif;
+        }
+        /* Layout kolom: bar timer di atas, area embed mengisi sisa tinggi layar */
+        body {
+            display: flex;
+            flex-direction: column;
+        }
+        #warning-screen {
+            display: flex;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 9999;
+            text-align: center;
+        }
+        #warning-screen h2 {
+            color: var(--bahaya);
+            margin-bottom: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        #tombol-kamera {
+            margin: 0 0 12px;
+            background: #1565c0;
+        }
+        iframe {
+            width: 100%;
+            flex: 1 1 auto;
+            min-height: 0;
+            height: auto;
+            border: none;
+            display: block;
+        }
+
+        /* Timer */
+        #timer-bar {
+            position: relative;
+            flex: 0 0 auto;
+            width: 100%;
+            padding: 10px 16px;
+            box-sizing: border-box;
+            background: rgba(0,0,0,0.75);
+            color: #fff;
+            font-size: 20px;
+            font-weight: bold;
+            text-align: center;
+            z-index: 9998;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+        #timer-bar.aman { background: rgba(0,0,0,0.75); color: #fff; }
+        #timer-bar.menipis { background: #b71c1c; color: #fff; }
+        #timer-bar.penalty {
+            background: var(--bahaya);
+            color: #fff;
+            animation: getar 0.5s ease-in-out;
+        }
+        @keyframes getar {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-6px); }
+            75% { transform: translateX(6px); }
+        }
+        #timer-text { font-variant-numeric: tabular-nums; letter-spacing: 1px; }
+        #timer-total { font-size: 13px; font-weight: normal; opacity: 0.75; }
+        #penalti-total { font-size: 13px; font-weight: normal; color: #ffcdd2; }
+
+        /* Toast penalti */
+        #toast-penalty {
+            position: fixed;
+            top: 64px; left: 50%;
+            transform: translateX(-50%) scale(0.7);
+            padding: 14px 26px;
+            background: var(--bahaya);
+            color: #fff;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 8px;
+            z-index: 10000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+        }
+        #toast-penalty.tampil {
+            opacity: 1;
+            transform: translateX(-50%) scale(1);
+        }
+        #toast-penalty small {
+            display: block;
+            font-size: 13px;
+            font-weight: normal;
+            margin-top: 4px;
+        }
+
+        /* Panel Kamera */
+        .sembunyi { display: none !important; }
+        #kamera-panel {
+            position: fixed;
+            right: 16px;
+            bottom: 16px;
+            width: 240px;
+            background: #111;
+            border: 2px solid #2e7d32;
+            border-radius: 10px;
+            overflow: hidden;
+            z-index: 10001;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            transition: border-color 0.2s ease, width 0.2s ease;
+        }
+        #kamera-panel.aman { border-color: #2e7d32; }
+        #kamera-panel.peringatan { border-color: #f9a825; }
+        #kamera-panel.bahaya { border-color: var(--bahaya); animation: getar 0.5s ease-in-out; }
+        #kamera-panel.minim { width: 130px; }
+        #kamera-panel.minim #kamera-video,
+        #kamera-panel.minim #kamera-status { display: none; }
+        #kamera-video {
+            display: block;
+            width: 100%;
+            height: 180px;
+            object-fit: cover;
+            background: #000;
+            transform: scaleX(-1);
+        }
+        #kamera-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 5px 8px;
+            font-size: 11px;
+            color: #fff;
+        }
+        #kamera-status {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        #kamera-toggle {
+            flex: 0 0 auto;
+            padding: 0 7px;
+            font-size: 13px;
+            line-height: 1.5;
+            background: transparent;
+            border: 1px solid rgba(255,255,255,0.35);
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Layar Peringatan / Tombol Mulai -->
+    <div id="warning-screen">
+        <h2 id="judul-peringatan">Perhatian!</h2>
+        <p id="pesan-peringatan">Ujian ini mewajibkan mode layar penuh (fullscreen) dan tidak boleh berpindah tab.</p>
+        <p>Durasi ujian: <strong id="durasi-info">-</strong> &nbsp;|&nbsp; Penalti per pelanggaran: <strong id="penalti-info">-</strong></p>
+        <p id="violation-count">Pelanggaran terdeteksi: 0</p>
+        <p id="sisa-waktu-info">Sisa waktu: -</p>
+        <p id="kamera-info">Kamera: <strong>meminta izin...</strong></p>
+        <button id="tombol-kamera" type="button" class="sembunyi">Aktifkan Kamera</button>
+        <button id="tombol-mulai">Mulai Ujian</button>
+    </div>
+
+    <!-- Bar Timer -->
+    <div id="timer-bar">
+        <span id="timer-text">00:00:00</span>
+        <span id="timer-total"></span>
+        <span id="penalti-total"></span>
+    </div>
+
+    <!-- Notifikasi Penalti -->
+    <div id="toast-penalty">
+        <span id="toast-penalty-teks">-30 Detik</span>
+        <small id="toast-penalty-keterangan">Waktu mundur 30 detik</small>
+    </div>
+
+    <!-- Panel Kamera Pengawasan -->
+    <div id="kamera-panel" class="sembunyi">
+        <video id="kamera-video" autoplay playsinline muted></video>
+        <div id="kamera-bar">
+            <span id="kamera-status">Kamera nonaktif</span>
+            <button id="kamera-toggle" type="button" title="Sembunyikan / tampilkan panel">&minus;</button>
+        </div>
+    </div>
+
+    <!-- Ganti URL Google Form Anda di bawah ini -->
+    <iframe id="form-iframe" src="https://forms.gle/76i7VScjAxrtT8wh8"></iframe>
+
+    <script>
+        // ============ KONFIGURASI ============
+        const DURASI_UJIAN_MENIT = 70;   // Durasi ujian dalam menit
+        const PENALTI_DETIK = 300;        // Pengurangan waktu per pelanggaran (detik)
+        const AMBANG_MENIPIS = 600;      // Tampil merah jika sisa waktu <= 10 menit
+
+        // ============ KONFIGURASI KAMERA ============
+        const KAMERA_AKTIF = true;        //true = kamera wajib aktif selama ujian
+        const MAKS_WAJAH = 1;             // Jumlah wajah yang boleh terlihat
+        const INTERVAL_DETEKSI_MS = 1000; // Interval pemeriksaan wajah
+        const MAKS_TANPA_WAJAH_DETIK = 10;// Toleransi wajah tidak terdeteksi
+        const JEDA_PENALTI_MS = 8000;     // Jeda minimal antar penalti kamera
+
+        // ============ STATE ============
+        let pelanggaran = 0;
+        let totalPenalti = 0;            // Total detik yang dipotong
+        let durasiUjian = DURASI_UJIAN_MENIT * 60;
+        let sisaWaktu = durasiUjian;
+        let ujianDimulai = false;
+        let waktuHabis = false;
+        let intervalId = null;
+        let streamKamera = null;
+        let kameraAktif = false;
+        let detektorWajah = null;
+        let intervalDeteksi = null;
+        let jumlahWajah = 0;
+        let detikTanpaWajah = 0;
+        let terakhirPenaltiKamera = 0;
+
+        const elWarning = document.getElementById('warning-screen');
+        const elJudgeul = document.getElementById('judul-peringatan');
+        const elPesan = document.getElementById('pesan-peringatan');
+        const elTombol = document.getElementById('tombol-mulai');
+        const elViolation = document.getElementById('violation-count');
+        const elSisaInfo = document.getElementById('sisa-waktu-info');
+        const elDurasiInfo = document.getElementById('durasi-info');
+        const elPenaltiInfo = document.getElementById('penalti-info');
+        const elTimerBar = document.getElementById('timer-bar');
+        const elTimerText = document.getElementById('timer-text');
+        const elTimerTotal = document.getElementById('timer-total');
+        const elPenaltiTotal = document.getElementById('penalti-total');
+        const elToast = document.getElementById('toast-penalty');
+        const elToastTeks = document.getElementById('toast-penalty-teks');
+        const elToastKet = document.getElementById('toast-penalty-keterangan');
+        const elPanelKamera = document.getElementById('kamera-panel');
+        const elVideo = document.getElementById('kamera-video');
+        const elStatusKamera = document.getElementById('kamera-status');
+        const elToggleKamera = document.getElementById('kamera-toggle');
+        const elKameraInfo = document.getElementById('kamera-info');
+        const elTombolKamera = document.getElementById('tombol-kamera');
+
+        function formatWaktu(detik) {
+            detik = Math.max(0, Math.floor(detik));
+            const jam = Math.floor(detik / 3600);
+            const menit = Math.floor((detik % 3600) / 60);
+            const detikSisa = detik % 60;
+            return [jam, menit, detikSisa]
+                .map(n => String(n).padStart(2, '0'))
+                .join(':');
+        }
+
+        function perbaruiTimer() {
+            elTimerText.textContent = formatWaktu(sisaWaktu);
+            elTimerTotal.textContent = 'dari ' + formatWaktu(durasiUjian);
+            elPenaltiTotal.textContent = totalPenalti > 0
+                ? 'Penalti: -' + formatWaktu(totalPenalti)
+                : '';
+            elSisaInfo.textContent = 'Sisa waktu: ' + formatWaktu(sisaWaktu);
+        }
+
+        function mulaiTimer() {
+            if (intervalId !== null) return;
+            intervalId = setInterval(() => {
+                if (!ujianDimulai || waktuHabis) return;
+                sisaWaktu--;
+                perbaruiTimer();
+                perbaruiWarnaTimer();
+                if (sisaWaktu <= 0) {
+                    sisaWaktu = 0;
+                    waktuHabis = true;
+                    berhentiTimer();
+                    perbaruiTimer();
+                    akhiriUjian('Waktu ujian telah habis.');
+                }
+            }, 1000);
+        }
+
+        function berhentiTimer() {
+            if (intervalId !== null) {
+                clearInterval(intervalId);
+                intervalId = null;
+            }
+        }
+
+        function perbaruiWarnaTimer() {
+            elTimerBar.classList.remove('aman', 'menipis');
+            if (sisaWaktu <= AMBANG_MENIPIS) {
+                elTimerBar.classList.add('menipis');
+            } else {
+                elTimerBar.classList.add('aman');
+            }
+        }
+
+        // Terapkan penalti waktu mundur
+        function terapkanPenalti(alasan) {
+            if (waktuHabis) return;
+
+            pelanggaran++;
+            totalPenalti += PENALTI_DETIK;
+            sisaWaktu = Math.max(0, sisaWaktu - PENALTI_DETIK);
+
+            // Update angka
+            document.getElementById('violation-count').innerText = "Pelanggaran terdeteksi: " + pelanggaran;
+            perbaruiTimer();
+            perbaruiWarnaTimer();
+
+            // Efek visual
+            elTimerBar.classList.remove('penalty');
+            void elTimerBar.offsetWidth;
+            elTimerBar.classList.add('penalty');
+            setTimeout(() => elTimerBar.classList.remove('penalty'), 500);
+
+            elToastTeks.textContent = '-' + PENALTI_DETIK + ' Detik';
+            elToastKet.textContent = 'Waktu mundur ' + PENALTI_DETIK + ' detik' +
+                (alasan ? ' karena ' + alasan : '') +
+                ' | Sisa waktu: ' + formatWaktu(sisaWaktu);
+            elToast.classList.add('tampil');
+            clearTimeout(elToast._timer);
+            elToast._timer = setTimeout(() => elToast.classList.remove('tampil'), 3000);
+
+            if (sisaWaktu <= 0) {
+                waktuHabis = true;
+                berhentiTimer();
+                perbaruiTimer();
+                akhiriUjian('Waktu ujian habis karena penalti pelanggaran.');
+            }
+        }
+
+        function tampilkanPeringatan(judul, pesan, aksiTeks) {
+            elJudgeul.textContent = judul;
+            elPesan.textContent = pesan;
+            elTombol.textContent = aksiTeks || 'Lanjutkan Ujian';
+            elWarning.style.display = 'flex';
+        }
+
+        function tutupUjian() {
+            // Pastikan tidak ada timer / kamera yang masih berjalan
+            waktuHabis = true;
+            berhentiTimer();
+            berhentiDeteksiWajah();
+            matikanKamera();
+            elPanelKamera.classList.add('sembunyi');
+
+            let berhasil = false;
+            try {
+                window.close();
+                berhasil = window.closed === true;
+            } catch (err) {
+                berhasil = false;
+            }
+            if (berhasil) return;
+
+            // window.close() hanya bekerja untuk window yang dibuka oleh script
+            setTimeout(() => {
+                if (window.closed) return;
+                tampilkanPeringatan(
+                    'Ujian Selesai',
+                    'Browser tidak mengizinkan menutup tab secara otomatis. ' +
+                    'Silakan tutup tab ini secara manual (Ctrl+W atau tombol close pada tab).',
+                    'Paksa Tutup Halaman'
+                );
+                elTombol.onclick = function () { location.replace('about:blank'); };
+            }, 300);
+        }
+
+        function akhiriUjian(pesan) {
+            matikanKamera();
+            elPanelKamera.classList.add('sembunyi');
+            tampilkanPeringatan('Ujian Selesai', pesan, 'Tutup');
+            elTombol.onclick = function () { tutupUjian(); };
+            if (document.fullscreenElement && document.exitFullscreen) {
+                document.exitFullscreen();
+            }
+        }
+
+        // ============ KAMERA ============
+        function perbaruiInfoKamera(teks, perluTombol) {
+            if (!KAMERA_AKTIF) {
+                elKameraInfo.innerHTML = 'Kamera: <strong>tidak digunakan</strong>';
+                return;
+            }
+            elKameraInfo.innerHTML = 'Kamera: <strong>' + teks + '</strong>';
+            elTombolKamera.classList.toggle('sembunyi', !perluTombol);
+        }
+
+        function statusKamera(kelas, teks) {
+            if (!KAMERA_AKTIF) return;
+            elPanelKamera.classList.remove('sembunyi', 'aman', 'peringatan', 'bahaya');
+            if (kelas) elPanelKamera.classList.add(kelas);
+            elStatusKamera.textContent = teks;
+        }
+
+        function siapkanDeteksiWajah() {
+            detektorWajah = null;
+            if (typeof window.FaceDetector === 'function') {
+                try {
+                    detektorWajah = new window.FaceDetector({
+                        fastMode: true,
+                        maxDetectedFaces: MAKS_WAJAH + 2
+                    });
+                } catch (err) {
+                    detektorWajah = null;
+                }
+            }
+            if (kameraAktif) {
+                statusKamera(detektorWajah ? 'aman' : 'peringatan', detektorWajah
+                    ? 'Memantau wajah...'
+                    : 'Kamera aktif (deteksi wajah tidak didukung)');
+            }
+        }
+
+        async function nyalakanKamera() {
+            if (!KAMERA_AKTIF) return true;
+            if (kameraAktif) {
+                perbaruiInfoKamera('aktif dan siap', false);
+                return true;
+            }
+
+            perbaruiInfoKamera('meminta izin...', false);
+
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusKamera('bahaya', 'Kamera tidak didukung browser');
+                perbaruiInfoKamera('tidak didukung browser ini', true);
+                return false;
+            }
+
+            try {
+                statusKamera('peringatan', 'Meminta izin kamera...');
+                streamKamera = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                });
+                elVideo.srcObject = streamKamera;
+                elVideo.muted = true;
+                await new Promise(resolve => {
+                    if (elVideo.readyState >= 1) return resolve();
+                    elVideo.addEventListener('loadedmetadata', resolve, { once: true });
+                    setTimeout(resolve, 3000);
+                });
+                elVideo.play().catch(() => {});
+                kameraAktif = true;
+                siapkanDeteksiWajah();
+                perbaruiInfoKamera('aktif dan siap', false);
+                return true;
+            } catch (err) {
+                streamKamera = null;
+                kameraAktif = false;
+                statusKamera('bahaya', 'Izin kamera ditolak');
+                perbaruiInfoKamera('belum aktif - izin ditolak', true);
+                console.warn('Akses kamera gagal:', err);
+                return false;
+            }
+        }
+
+        function matikanKamera() {
+            berhentiDeteksiWajah();
+            if (streamKamera) streamKamera.getTracks().forEach(t => t.stop());
+            streamKamera = null;
+            kameraAktif = false;
+            elVideo.srcObject = null;
+            jumlahWajah = 0;
+            detikTanpaWajah = 0;
+            if (KAMERA_AKTIF) statusKamera('bahaya', 'Kamera nonaktif');
+        }
+
+        function mulaiDeteksiWajah() {
+            berhentiDeteksiWajah();
+            if (!KAMERA_AKTIF || !kameraAktif) return;
+            intervalDeteksi = setInterval(periksaWajah, INTERVAL_DETEKSI_MS);
+            periksaWajah();
+        }
+
+        function berhentiDeteksiWajah() {
+            if (intervalDeteksi !== null) {
+                clearInterval(intervalDeteksi);
+                intervalDeteksi = null;
+            }
+        }
+
+        function terapkanPenaltiKamera(alasan) {
+            if (!ujianDimulai || waktuHabis) return;
+            const sekarang = Date.now();
+            if (sekarang - terakhirPenaltiKamera < JEDA_PENALTI_MS) return;
+            terakhirPenaltiKamera = sekarang;
+            terapkanPenalti(alasan);
+        }
+
+        async function periksaWajah() {
+            if (!ujianDimulai || waktuHabis || document.hidden) return;
+
+            if (!kameraAktif || !streamKamera) {
+                tanganiKameraMati('kamera tidak aktif');
+                return;
+            }
+            const track = streamKamera.getVideoTracks()[0];
+            if (!track || track.readyState === 'ended') {
+                tanganiKameraMati('kamera terputus');
+                return;
+            }
+            if (!detektorWajah || elVideo.readyState < 2) return;
+
+            try {
+                const wajah = await detektorWajah.detect(elVideo);
+                jumlahWajah = wajah.length;
+            } catch (err) {
+                return;
+            }
+
+            if (jumlahWajah === 0) {
+                detikTanpaWajah += INTERVAL_DETEKSI_MS / 1000;
+                statusKamera('peringatan', 'Wajah tidak terdeteksi (' + Math.ceil(detikTanpaWajah) + 'd)');
+                if (detikTanpaWajah >= MAKS_TANPA_WAJAH_DETIK) {
+                    detikTanpaWajah = 0;
+                    terapkanPenaltiKamera('wajah tidak terdeteksi');
+                }
+            } else {
+                detikTanpaWajah = 0;
+                if (jumlahWajah > MAKS_WAJAH) {
+                    statusKamera('bahaya', 'Wajah: ' + jumlahWajah + ' orang');
+                    terapkanPenaltiKamera('terdeteksi ' + jumlahWajah + ' wajah');
+                } else {
+                    statusKamera('aman', 'Wajah: 1 (terpantau)');
+                }
+            }
+        }
+
+        function tanganiKameraMati(alasan) {
+            if (waktuHabis || !ujianDimulai) return;
+            matikanKamera();
+            terapkanPenaltiKamera(alasan);
+            tampilkanPeringatan(
+                'Kamera Terputus!',
+                'Akses kamera berhenti (' + alasan + '). Waktu mundur ' + PENALTI_DETIK + ' detik. ' +
+                'Izinkan kamera lalu lanjutkan ujian.',
+                'Aktifkan Kamera Lagi'
+            );
+            elTombol.onclick = function () {
+                elWarning.style.display = 'none';
+                nyalakanKamera().then(siap => {
+                    if (siap) {
+                        mulaiDeteksiWajah();
+                    } else {
+                        tampilkanPeringatan('Kamera Diperlukan',
+                            'Kamera tidak dapat diaktifkan. Periksa izin kamera pada browser lalu coba lagi.',
+                            'Coba Lagi');
+                        elTombol.onclick = function () { elWarning.style.display = 'none'; mulaiUjian(); };
+                    }
+                });
+            };
+        }
+
+        async function mulaiUjian() {
+            if (waktuHabis) return;
+
+            // Fullscreen dipanggil lebih dulu agar tetap berada dalam user gesture
+            const elem = document.documentElement;
+            if (elem.requestFullscreen) {
+                try { await elem.requestFullscreen(); } catch (err) { /* diabaikan */ }
+            }
+
+            if (KAMERA_AKTIF) {
+                const siap = await nyalakanKamera();
+                if (!siap) {
+                    tampilkanPeringatan(
+                        'Kamera Diperlukan',
+                        'Izin kamera ditolak atau kamera tidak tersedia. Ujian tidak dapat dimulai ' +
+                        'karena kamera digunakan untuk pengawasan.',
+                        'Coba Lagi'
+                    );
+                    elTombol.onclick = function () { elWarning.style.display = 'none'; mulaiUjian(); };
+                    return;
+                }
+            }
+
+            elWarning.style.display = 'none';
+            ujianDimulai = true;
+            mulaiTimer();
+            perbaruiTimer();
+            perbaruiWarnaTimer();
+            mulaiDeteksiWajah();
+        }
+
+        elTombol.onclick = function () { mulaiUjian(); };
+
+        elTombolKamera.onclick = async function () {
+            elTombolKamera.classList.add('sembunyi');
+            await nyalakanKamera();
+        };
+
+        elToggleKamera.addEventListener('click', function () {
+            const kecil = elPanelKamera.classList.toggle('minim');
+            elToggleKamera.innerHTML = kecil ? '&#9633;' : '&minus;';
+        });
+
+        // Inisialisasi
+        function posisikanToast() {
+            elToast.style.top = (elTimerBar.offsetHeight + 10) + 'px';
+        }
+        posisikanToast();
+        window.addEventListener('resize', posisikanToast);
+
+        elDurasiInfo.textContent = DURASI_UJIAN_MENIT + ' menit';
+        elPenaltiInfo.textContent = PENALTI_DETIK + ' detik';
+        perbaruiTimer();
+        perbaruiWarnaTimer();
+
+        // Izin kamera diminta sebelum ujian dimulai
+        if (KAMERA_AKTIF) {
+            elPesan.textContent += ' Kamera juga diaktifkan dan wajah Anda dipantau selama ujian.';
+        }
+        nyalakanKamera();
+
+        // Deteksi jika keluar dari Fullscreen
+        document.addEventListener("fullscreenchange", () => {
+            if (!document.fullscreenElement) {
+                if (waktuHabis || !ujianDimulai) return;
+                terapkanPenalti('keluar dari layar penuh');
+                tampilkanPeringatan(
+                    'Pelanggaran Terdeteksi!',
+                    'Anda keluar dari layar penuh. Waktu mundur ' + PENALTI_DETIK + ' detik.',
+                    'Lanjutkan Ujian'
+                );
+            }
+        });
+
+        // Deteksi jika berpindah tab atau meminimalkan browser
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden) {
+                if (waktuHabis || !ujianDimulai) return;
+                terapkanPenalti('meninggalkan halaman ujian');
+                tampilkanPeringatan(
+                    'Pelanggaran Terdeteksi!',
+                    'Anda terdeteksi meninggalkan halaman ujian (' + pelanggaran + '). ' +
+                    'Waktu mundur ' + PENALTI_DETIK + ' detik.',
+                    'Lanjutkan Ujian'
+                );
+            }
+        });
+
+        // Mencegah Klik Kanan
+        document.addEventListener('contextmenu', event => event.preventDefault());
+    </script>
+</body>
+</html>
